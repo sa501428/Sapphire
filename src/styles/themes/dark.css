@@ -1,0 +1,32 @@
+:root[data-theme="dark"] {
+  --bg-base: #1a1b1e;
+  --bg-surface: #25262b;
+  --bg-elevated: #2c2e33;
+  --bg-hover: #373a40;
+  --bg-active: #4a4d57;
+
+  --border: #373a40;
+  --border-subtle: #2c2e33;
+
+  --text-primary: #c1c2c5;
+  --text-secondary: #909296;
+  --text-muted: #5c5f66;
+  --text-accent: #74c0fc;
+  --text-on-accent: #1a1b1e;
+
+  --accent: #228be6;
+  --accent-hover: #1c7ed6;
+  --accent-muted: #1864ab44;
+
+  --diff-add-bg: #1a3a2a;
+  --diff-add-text: #51cf66;
+  --diff-del-bg: #3a1a1a;
+  --diff-del-text: #ff6b6b;
+  --diff-mod-bg: #2a2a1a;
+
+  --tab-active-bg: #1a1b1e;
+  --tab-inactive-bg: #25262b;
+
+  --scrollbar: #373a40;
+  --scrollbar-hover: #4a4d57;
+}
