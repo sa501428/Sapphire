@@ -2,7 +2,9 @@
 
 A fast, local-only markdown editor with Git-aware session diffing. Built as a native desktop app — no cloud, no telemetry, no network required.
 
-![Sapphire Logo](sapphire.png)
+<p align="center">
+  <img src="sapphire.png" alt="Sapphire Logo" width="200">
+</p>
 
 ---
 
