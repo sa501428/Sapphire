@@ -139,4 +139,4 @@ sapphire/
 
 ## License
 
-MIT — Copyright 2026 Muhammad Saad Shamim
+MIT License
