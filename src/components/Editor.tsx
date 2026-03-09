@@ -30,7 +30,8 @@ import { useSettingsStore } from "../store/settingsStore";
 
 // ── Hunk highlight StateEffect / StateField ───────────────────────────────────
 
-export const setHunkHighlight = StateEffect.define<{ from: number; to: number } | null>();
+// Effect carries an array of 1-based line numbers to highlight (or null to clear)
+export const setHunkHighlight = StateEffect.define<number[] | null>();
 
 const hunkHighlightField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -38,14 +39,19 @@ const hunkHighlightField = StateField.define<DecorationSet>({
     deco = deco.map(tr.changes);
     for (const e of tr.effects) {
       if (e.is(setHunkHighlight)) {
-        deco = e.value
-          ? Decoration.set([
-              Decoration.mark({ class: "cm-hunk-highlight" }).range(
-                e.value.from,
-                e.value.to
-              ),
-            ])
-          : Decoration.none;
+        if (!e.value || e.value.length === 0) {
+          deco = Decoration.none;
+        } else {
+          const doc = tr.state.doc;
+          const marks = e.value
+            .filter((ln) => ln >= 1 && ln <= doc.lines)
+            .map((ln) =>
+              Decoration.line({ class: "cm-hunk-highlight" }).range(
+                doc.line(ln).from
+              )
+            );
+          deco = marks.length > 0 ? Decoration.set(marks) : Decoration.none;
+        }
       }
     }
     return deco;
@@ -117,10 +123,11 @@ export function Editor({
           background: "var(--accent-muted) !important",
         },
         ".cm-cursor": { borderLeftColor: "var(--accent)" },
+        // Decoration.line puts a class on the .cm-line div (background only)
+        // so ::selection on text nodes inside is still fully visible
         ".cm-hunk-highlight": {
-          background: "rgba(250, 196, 25, 0.2)",
-          outline: "1px solid rgba(250, 196, 25, 0.4)",
-          borderRadius: "2px",
+          background: "rgba(250, 196, 25, 0.15)",
+          borderLeft: "3px solid rgba(250, 196, 25, 0.8)",
         },
       }),
     ];

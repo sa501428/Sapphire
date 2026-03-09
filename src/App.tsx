@@ -27,16 +27,32 @@ function EmptyState() {
   );
 }
 
-/** Scroll the CM view to a line range and apply hunk highlight. */
-function jumpToHunk(view: EditorView, startLine: number, endLine: number) {
+/** Scroll the CM view to a hunk and highlight only the changed (insert) lines. */
+function jumpToHunk(view: EditorView, hunk: HunkInfo) {
   const doc = view.state.doc;
   const totalLines = doc.lines;
-  const from = doc.line(Math.max(1, Math.min(startLine, totalLines))).from;
-  const to = doc.line(Math.max(1, Math.min(endLine, totalLines))).to;
+
+  // Only highlight lines that are actually inserted in the current buffer
+  const insertLinenos = hunk.lines
+    .filter((l) => l.tag === "insert")
+    .map((l) => l.new_lineno)
+    .filter((n): n is number => n !== null && n >= 1 && n <= totalLines);
+
+  // For pure deletions (no inserts) highlight the anchor line instead
+  const linesToMark =
+    insertLinenos.length > 0
+      ? insertLinenos
+      : hunk.insertAfterNewLine > 0 && hunk.insertAfterNewLine <= totalLines
+      ? [hunk.insertAfterNewLine]
+      : [];
+
+  const scrollTarget = linesToMark.length > 0 ? linesToMark[0] : hunk.newLineAnchor;
+  const scrollLine = Math.max(1, Math.min(scrollTarget, totalLines));
+
   view.dispatch({
     effects: [
-      setHunkHighlight.of({ from, to }),
-      EditorView.scrollIntoView(from, { y: "center" }),
+      setHunkHighlight.of(linesToMark),
+      EditorView.scrollIntoView(doc.line(scrollLine).from, { y: "center" }),
     ],
   });
 }
@@ -118,15 +134,7 @@ export default function App() {
       setActiveHunkIndex(i);
       const hunk = hunks[i];
       if (!hunk || !editorViewRef.current) return;
-
-      const anchor = hunk.newLineAnchor;
-      // Compute end line: highest new_lineno in this hunk
-      const newLinenos = hunk.lines
-        .map((l) => l.new_lineno)
-        .filter((n): n is number => n !== null);
-      const endLine = newLinenos.length > 0 ? Math.max(...newLinenos) : anchor;
-
-      jumpToHunk(editorViewRef.current, anchor, endLine);
+      jumpToHunk(editorViewRef.current, hunk);
     },
     [hunks]
   );
