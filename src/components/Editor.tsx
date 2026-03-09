@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
-import { EditorState, Extension } from "@codemirror/state";
+import {
+  EditorState,
+  Extension,
+  StateEffect,
+  StateField,
+} from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -8,6 +13,8 @@ import {
   highlightActiveLineGutter,
   drawSelection,
   ViewUpdate,
+  Decoration,
+  DecorationSet,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, search } from "@codemirror/search";
@@ -20,34 +27,55 @@ import {
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { useSettingsStore } from "../store/settingsStore";
-import { DiffLine } from "../store/gitStore";
+
+// ── Hunk highlight StateEffect / StateField ───────────────────────────────────
+
+export const setHunkHighlight = StateEffect.define<{ from: number; to: number } | null>();
+
+const hunkHighlightField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(setHunkHighlight)) {
+        deco = e.value
+          ? Decoration.set([
+              Decoration.mark({ class: "cm-hunk-highlight" }).range(
+                e.value.from,
+                e.value.to
+              ),
+            ])
+          : Decoration.none;
+      }
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 interface EditorProps {
   content: string;
   onChange: (value: string) => void;
   onCursorChange?: (line: number, col: number) => void;
-  diffLines?: DiffLine[];
+  onEditorReady?: (view: EditorView) => void;
   path: string;
 }
 
-export function Editor({ content, onChange, onCursorChange, diffLines, path }: EditorProps) {
+export function Editor({
+  content,
+  onChange,
+  onCursorChange,
+  onEditorReady,
+  path,
+}: EditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const { theme, fontSize, fontFamily, softWrap, showLineNumbers } = useSettingsStore();
+  const { theme, fontSize, fontFamily, softWrap, showLineNumbers } =
+    useSettingsStore();
 
-  // Build highlighted line set from diff
-  const buildDiffDecorations = (lines: DiffLine[]) => {
-    const addLines = new Set<number>();
-    const delLines = new Set<number>();
-    for (const l of lines) {
-      if (l.new_lineno !== null) {
-        if (l.tag === "insert") addLines.add(l.new_lineno);
-      }
-    }
-    return { addLines, delLines };
-  };
-
-  const buildExtensions = (initialContent: string): Extension[] => {
+  const buildExtensions = (): Extension[] => {
     const exts: Extension[] = [
       history(),
       drawSelection(),
@@ -57,6 +85,7 @@ export function Editor({ content, onChange, onCursorChange, diffLines, path }: E
       search({ top: true }),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(defaultHighlightStyle),
+      hunkHighlightField,
       keymap.of([
         ...defaultKeymap,
         ...historyKeymap,
@@ -77,14 +106,22 @@ export function Editor({ content, onChange, onCursorChange, diffLines, path }: E
         "&": { height: "100%", fontSize: `${fontSize}px`, fontFamily },
         ".cm-scroller": { overflow: "auto", lineHeight: "1.7" },
         ".cm-content": { padding: "8px 0" },
-        ".cm-gutters": { background: "var(--bg-surface)", borderRight: "1px solid var(--border)", color: "var(--text-muted)" },
+        ".cm-gutters": {
+          background: "var(--bg-surface)",
+          borderRight: "1px solid var(--border)",
+          color: "var(--text-muted)",
+        },
         ".cm-activeLineGutter": { background: "var(--bg-hover)" },
         ".cm-activeLine": { background: "var(--bg-hover)" },
-        ".cm-selectionBackground, ::selection": { background: "var(--accent-muted) !important" },
+        ".cm-selectionBackground, ::selection": {
+          background: "var(--accent-muted) !important",
+        },
         ".cm-cursor": { borderLeftColor: "var(--accent)" },
-        // Diff gutter marks
-        ".cm-diff-add-line": { background: "rgba(81, 207, 102, 0.15)" },
-        ".cm-diff-del-line": { background: "rgba(255, 107, 107, 0.15)" },
+        ".cm-hunk-highlight": {
+          background: "rgba(250, 196, 25, 0.2)",
+          outline: "1px solid rgba(250, 196, 25, 0.4)",
+          borderRadius: "2px",
+        },
       }),
     ];
 
@@ -98,32 +135,23 @@ export function Editor({ content, onChange, onCursorChange, diffLines, path }: E
       );
     }
 
-    if (showLineNumbers) {
-      exts.push(lineNumbers(), highlightActiveLineGutter());
-    }
-
-    if (softWrap) {
-      exts.push(EditorView.lineWrapping);
-    }
+    if (showLineNumbers) exts.push(lineNumbers(), highlightActiveLineGutter());
+    if (softWrap) exts.push(EditorView.lineWrapping);
 
     return exts;
   };
 
-  // Mount editor
   useEffect(() => {
     if (!containerRef.current) return;
 
     const state = EditorState.create({
       doc: content,
-      extensions: buildExtensions(content),
+      extensions: buildExtensions(),
     });
 
-    const view = new EditorView({
-      state,
-      parent: containerRef.current,
-    });
-
+    const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
+    onEditorReady?.(view);
 
     return () => {
       view.destroy();
@@ -131,31 +159,30 @@ export function Editor({ content, onChange, onCursorChange, diffLines, path }: E
     };
   }, []); // mount once
 
-  // Sync content when file path changes (switching tabs)
+  // Sync content when switching files
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const current = view.state.doc.toString();
-    if (current !== content) {
+    const cur = view.state.doc.toString();
+    if (cur !== content) {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: content },
+        effects: setHunkHighlight.of(null),
+      });
+    }
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync content on external changes (revert etc.)
+  const lastExternal = useRef(content);
+  useEffect(() => {
+    if (lastExternal.current === content) return;
+    lastExternal.current = content;
+    const view = viewRef.current;
+    if (!view) return;
+    if (view.state.doc.toString() !== content) {
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: content },
       });
-    }
-  }, [path]); // when switching files
-
-  // Sync content when content prop changes externally (e.g., revert)
-  const lastExternalContent = useRef(content);
-  useEffect(() => {
-    if (lastExternalContent.current !== content) {
-      lastExternalContent.current = content;
-      const view = viewRef.current;
-      if (!view) return;
-      const current = view.state.doc.toString();
-      if (current !== content) {
-        view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: content },
-        });
-      }
     }
   }, [content]);
 
